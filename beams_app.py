@@ -781,7 +781,7 @@ class BeamsOperator:
                         _match = (_co_norm in _fa_norm) or (_fa_norm in _co_norm)
                     _match_str = "✔マッチ" if _match else "✗不一致"
                     self.log(f"  {prefix}[DEBUG] row[{ri}] oaza=「{oaza}」 azacho=「{azacho}」 combined=「{combined}」 {_match_str} (full_address=「{full_address[:40]}…」)")
-                    if _match and len(combined) > best_len:
+                    if _match and len(combined) >= best_len:
                         target_link    = link
                         best_len       = len(combined)
                         selected_oaza  = oaza
