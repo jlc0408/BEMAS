@@ -2214,7 +2214,7 @@ class BeamsApp:
         header = tk.Frame(self.root, bg=PRIMARY, height=48)
         header.pack(fill="x", side="top")
         header.pack_propagate(False)
-        tk.Label(header, text="BEAMS 自動入力 v8.5", bg=PRIMARY, fg="white",
+        tk.Label(header, text="BEAMS 自動入力 v9.0.0", bg=PRIMARY, fg="white",
                  font=("Yu Gothic UI", 13, "bold")).pack(side=tk.LEFT, padx=16, pady=10)
 
         # アップデート情報ボタン（右端）
