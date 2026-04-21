@@ -2092,7 +2092,7 @@ class BeamsApp:
             self.root = TkinterDnD.Tk()
         except Exception:
             self.root = tk.Tk()
-        self.root.title("BEAMS 自動入力 v8.5")
+        self.root.title("BEAMS 自動入力 v9.0.0")
 
         # アイコン設定
         _icon_path = data_path("icon.ico")
