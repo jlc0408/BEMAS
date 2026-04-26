@@ -1450,10 +1450,111 @@ class BeamsOperator:
 
     # ---- 申込サービス入力（1️⃣〜4️⃣）--------------------------------
 
+    # ===========================================================
+    # 商材・電話プラン PDFコード→BEAMSマッピングテーブル
+    # ===========================================================
+    # キー: PDFコード（英数字のみ・大文字）で部分一致検索
+    # 値  : (beams_value, maesaku_comment, plan_type)
+    #   beams_value      : BEAMSに入力するテキスト
+    #   maesaku_comment  : 前確コメントへの追記文字列（なければ ""）
+    #   plan_type        : "cross" / "hayabusa" / "gigaline" / "error" / "skip"
+    # ===========================================================
+    PRODUCT_MAP = {
+        # ── スキップ（空欄） ──
+        "":    ("", "", "skip"),
+
+        # ── 商材 ──
+        "2R":  ("フレッツ 光ネクスト マンション・ハイスピードタイプ（光配線方式）", "", "cross"),
+        "2T":  ("フレッツ 光ネクスト ファミリー・ハイスピードタイプ",               "", "cross"),
+        "2S":  ("フレッツ 光ネクスト マンション・ハイスピードタイプ（光配線方式）", "", "cross"),
+        "2W":  ("フレッツ 光ネクスト ファミリー・ハイスピードタイプ",               "", "cross"),
+        "2B":  ("フレッツ光ネクストファミリー",                                      "", "cross"),
+        "2G":  ("フレッツ光ネクストマンション",                                      "", "cross"),
+        "2C":  ("フレッツ光ネクストマンション",                                      "", "cross"),
+        "2H":  ("フレッツ光ネクストマンション",                                      "", "cross"),
+        "HJ":  ("フレッツ光ネクスト ファミリー・ギガライン東",                       "", "gigaline"),
+        "HK":  ("フレッツ光ネクスト ファミリー・ギガライン東",                       "", "gigaline"),
+        "HL":  ("フレッツ光ネクスト マンション・ギガライン東",                       "", "gigaline"),
+        "HM":  ("フレッツ光ネクスト マンション・ギガライン東",                       "", "gigaline"),
+        "T17": ("フレッツ光ネクストファミリー",                                      "【オフィスＦ】", "cross"),
+        "T18": ("フレッツ光ネクストマンション",                                      "【オフィスＭＳ】", "cross"),
+        "FC":  ("フレッツ光ネクスト プライオ1",                                      "", "cross"),
+        "FD":  ("フレッツ光ネクスト プライオ1（VCAST）",                             "", "cross"),
+        "FB":  ("フレッツ光ネクスト プライオ10",                                     "", "cross"),
+        "2D":  ("フレッツ光ネクストビジネスタイプ",                                  "", "cross"),
+        "T1A": ("フレッツ光ネクストファミリー",                                      "【クロスＦ】",   "cross"),
+        "T1B": ("フレッツ光ネクストファミリー",                                      "【クロスＦ】",   "cross"),
+        "T1C": ("フレッツ光ネクストマンション",                                      "【クロスＭＳ】", "cross"),
+        "T1D": ("フレッツ光ネクストマンション",                                      "【クロスＭＳ】", "cross"),
+        "T1I": ("フレッツ光ネクストビジネスタイプ",                                  "【クロスＦ】",   "cross"),
+        "T1F": ("フレッツ光ネクストファミリー",                                      "【クロスＭＳ】", "cross"),
+        "T1G": ("フレッツ光ネクストマンション",                                      "【クロスＭＳ】", "cross"),
+        # ── A4系: 商材欄に来たらエラー ──
+        "A4B": ("", "", "error"),
+        "A4C": ("", "", "error"),
+        "A4D": ("", "", "error"),
+        "A4E": ("", "", "error"),
+        # ── 隼（西日本） ──
+        "3L":  ("フレッツ光ネクスト隼ファミリー",  "", "hayabusa"),
+        "A1A": ("フレッツ光ネクスト隼ファミリー",  "", "hayabusa"),
+        "3M":  ("フレッツ光ネクスト隼マンション",  "", "hayabusa"),
+    }
+
+    # 電話プランマッピングテーブル
+    # キー: PDFコード（英数字のみ・大文字）
+    # 値  : (beams_value, use_option)
+    #   use_option: True = オプション追加あり, False = 電話なし（スキップ）
+    PHONE_MAP = {
+        "":    ("", False),   # 空欄 → 電話なし
+        "4B":  ("ひかり電話_エースプラン",       True),
+        "4C":  ("ひかり電話_基本プラン",         True),
+        "4D":  ("ひかり電話_安心プラン",         True),
+        "4E":  ("ひかり電話_もっと安心プラン",   True),
+        "AB0": ("ひかり電話_エースプラン",       True),
+        "AB1": ("ひかり電話_基本プラン",         True),
+        "AB2": ("",                              False),  # 電話なし
+        "AB3": ("",                              False),  # 電話なし
+        "4F":  ("ひかり電話_オフィスタイプ",     True),
+        "DF":  ("ひかり電話_オフィスエース",     True),
+    }
+
+    @staticmethod
+    def _normalize_code(raw: str) -> str:
+        """
+        PDFから抽出したコード文字列から英数字のみを抽出して大文字化する。
+        例: "* 2R " → "2R" / "A4E:" → "A4E" / "3L " → "3L"
+        先頭から最長一致でアルファベット＋数字の連続部分を返す。
+        """
+        # 先頭の記号・スペースを除去してから英数字連続部分を抜き出す
+        cleaned = re.sub(r'[^A-Za-z0-9]', ' ', raw).strip()
+        m = re.match(r'([A-Za-z0-9]+)', cleaned)
+        return m.group(1).upper() if m else ""
+
+    @staticmethod
+    def _lookup_product(code_raw: str, mapping: dict) -> tuple:
+        """
+        PDFコード文字列（生）からマッピングを引く。
+        正規化コードを先頭文字列として含むキーを部分一致で探す。
+        完全一致 → 前方一致の順で最初にヒットしたものを返す。
+        見つからない場合は None を返す。
+        """
+        code = BeamsOperator._normalize_code(code_raw)
+        if not code:
+            return mapping.get("", None)
+        # 完全一致
+        if code in mapping:
+            return mapping[code]
+        # 前方一致（コードが候補キーで始まる場合 / 候補キーがコードで始まる場合）
+        for key, val in mapping.items():
+            if key and (code.startswith(key) or key.startswith(code)):
+                return val
+        return None
+
     def section_service_info(self, pdf_data: dict):
         """
         申込サービス（主商材）〜 詳細入力 の全フロー。
-        livecamera_west.ini の [SERVICE] セクションを参照。
+        商材・電話プランはPDFコード（plan1_code / plan2_code）から
+        PRODUCT_MAP / PHONE_MAP を引いて自動決定する。
         """
         self.log("--- 申込サービス入力 開始 ---")
         page = self.page
@@ -1466,86 +1567,79 @@ class BeamsOperator:
         def _svc(key, fallback=''):
             return _live_svc.get(key, fallback).strip()
 
-        # 商材名をiniから取得
-        _plan_hayabusa  = _svc('plan_hayabusa',  'フレッツ光ネクスト隼ファミリー')
-        _plan_gigaline  = _svc('plan_gigaline',  'フレッツ光ネクスト ファミリー・ギガライン東')
-        _plan_cross     = _svc('plan_cross',     'フレッツ光ネクストファミリー')
-        _option_ace     = _svc('option_hayabusa','ひかり電話_エースプラン')
+        # ─── PDFコードからBEAMS商材・電話プランを決定 ─────────────────
+        _raw_product_code = pdf_data.get("plan1_code", "").strip()
+        _raw_phone_code   = pdf_data.get("plan2_code", "").strip()
 
-        # ─── 商材選択モード判定 ─────────────────────────────────────────
-        # plan_mode = auto  : PDFのプラン名からクロス/隼/ギガラインを自動判定（従来通り）
-        # plan_mode = fixed : 固定値（PDFに関わらず plan_cross/hayabusa/gigaline の固定値を使う）
-        _plan_mode = _svc('plan_mode', 'auto').lower().strip()
+        self.log(f"  [PDF] 商材コード=「{_raw_product_code}」 電話コード=「{_raw_phone_code}」")
 
-        # PDFのプラン名からクロス/隼/ギガラインを判定
-        plan1_name = pdf_data.get("plan1_name", "")
-        plan2_name = pdf_data.get("plan2_name", "")
-        all_plans  = plan1_name + plan2_name
-        is_hayabusa  = "隼"        in all_plans
-        is_gigaline  = "ギガライン" in all_plans
-        is_cross     = "クロス"    in all_plans
+        # ── 商材マッピング ──────────────────────────────────────────
+        _product_entry = BeamsOperator._lookup_product(
+            _raw_product_code, BeamsOperator.PRODUCT_MAP
+        )
 
-        if _plan_mode == 'fixed':
-            # 固定値モード: PDFに関わらず ini の固定値を使う
-            # どのプランを使うかは PDF判定を補助的に利用（判定できない場合はクロスをデフォルト）
-            if is_hayabusa:
-                plan_type    = "hayabusa"
-                main_product = _plan_hayabusa
-            elif is_gigaline:
-                plan_type    = "gigaline"
-                main_product = _plan_gigaline
-            else:
-                plan_type    = "cross"
-                main_product = _plan_cross
-            self.log(f"  商材モード: 固定値 → 商材=「{main_product}」")
+        if _product_entry is None:
+            # マッピング未定義コード → エラー扱い
+            raise ValueError(
+                f"商材コード「{_raw_product_code}」がマッピングテーブルに存在しません。"
+                f"未対応コードのため処理を中断します。"
+            )
+
+        main_product, _product_comment, plan_type = _product_entry
+
+        if plan_type == "error":
+            raise ValueError(
+                f"商材コード「{_raw_product_code}」はBEAMS入力不可（エラー商材）です。"
+                f"この案件を処理することができません。"
+            )
+
+        if plan_type == "skip":
+            # 商材空欄 → スキップ
+            self.log("  商材コード空欄 → 商材入力をスキップします")
+            main_product = ""
         else:
-            # auto: 従来通り PDF判定
-            if is_hayabusa:
-                plan_type    = "hayabusa"
-                main_product = _plan_hayabusa
-                self.log(f"  商材モード: 自動 / プラン判定: 隼 → 商材=「{main_product}」")
-            elif is_gigaline:
-                plan_type    = "gigaline"
-                main_product = _plan_gigaline
-                self.log(f"  商材モード: 自動 / プラン判定: ギガライン → 商材=「{main_product}」")
-            elif is_cross:
-                plan_type    = "cross"
-                main_product = _plan_cross
-                self.log(f"  商材モード: 自動 / プラン判定: クロス → 商材=「{main_product}」")
-            else:
-                plan_type    = "cross"
-                main_product = _plan_cross
-                self.log(f"  商材モード: 自動 / プラン判定: 不明（デフォルト: クロス）→ 商材=「{main_product}」")
+            self.log(f"  商材マッピング: 「{_raw_product_code}」 → 「{main_product}」"
+                     + (f" 前確追記:「{_product_comment}」" if _product_comment else ""))
 
-        # フリーボックス①: iniの free_box1 をそのまま使用（CMR/REQ自動判定なし）
+        # ── 電話プランマッピング ────────────────────────────────────
+        _phone_entry = BeamsOperator._lookup_product(
+            _raw_phone_code, BeamsOperator.PHONE_MAP
+        )
+
+        if _phone_entry is None:
+            # 未定義コード → 電話なし扱いで警告
+            self.log(f"  [警告] 電話コード「{_raw_phone_code}」がマッピングテーブルに存在しません。電話なし扱いにします。")
+            _option_ace  = ""
+            _use_option  = False
+            _use_detail_opt = False
+        else:
+            _option_ace, _use_option = _phone_entry
+            _use_detail_opt = _use_option
+            if _use_option:
+                self.log(f"  電話プランマッピング: 「{_raw_phone_code}」 → 「{_option_ace}」")
+            else:
+                self.log(f"  電話プランマッピング: 「{_raw_phone_code}」 → 電話なし（スキップ）")
+
+        # plan_type が hayabusa/gigaline の場合、電話オプション必須とする
+        # （商材判定と電話判定が矛盾する場合は電話マッピング優先）
+        if plan_type in ("hayabusa", "gigaline") and not _use_option:
+            self.log(f"  [情報] 商材が隼/ギガラインですが電話プランなしです（PDFコード通り）")
+
+        # フリーボックス①: iniの free_box1 をそのまま使用
         free_box1 = _live_other.get('free_box1', 'ＥＡＲＴＨ（ライブカメラ）').strip()
         self.log(f"  フリーボックス①: 「{free_box1}」")
 
-        # ─── 電話プランモード判定 ───────────────────────────────────
-        # phone_plan = auto  : PDFのプラン名から隼/ギガライン判定（従来通り）
-        # phone_plan = none  : 電話なし（オプション追加・詳細入力・オプション詳細 全スキップ）
-        # phone_plan = fixed : 固定値（option_hayabusa の値を常に入力）
-        _phone_plan = _svc('phone_plan', 'auto').lower().strip()
-
-        if _phone_plan == 'none':
-            # 電話なし: オプション追加もCS詳細も不要
-            _use_option  = False
-            _use_detail_opt = False
-            self.log(f"  電話プラン: なし（スキップ）")
-        elif _phone_plan == 'fixed':
-            # 固定値: 隼/ギガライン判定に関わらず常にオプションを追加
-            _use_option  = True
-            _use_detail_opt = True
-            # plan_type はクロス扱いにして主商材はini値をそのまま使う
-            if plan_type == "cross":
-                # クロスでも固定オプションを追加する場合: plan_typeを hayabusa 相当に変える
-                plan_type = "hayabusa"
-            self.log(f"  電話プラン: 固定値（{_option_ace}）")
+        # ─── 前確コメント（ntt_partner_note）に商材追記分を付加 ──────
+        _base_partner_note = _live_other.get('ntt_partner_note', '').strip()
+        if _product_comment:
+            # 既存の前確コメントに追記（重複しない場合のみ）
+            if _product_comment not in _base_partner_note:
+                ntt_partner_note_final = (_base_partner_note + _product_comment).strip()
+            else:
+                ntt_partner_note_final = _base_partner_note
+            self.log(f"  前確コメント: 「{_base_partner_note}」 + 「{_product_comment}」 → 「{ntt_partner_note_final}」")
         else:
-            # auto: 従来通り PDF判定
-            _use_option      = plan_type in ("hayabusa", "gigaline")
-            _use_detail_opt  = plan_type in ("hayabusa", "gigaline")
-            self.log(f"  電話プラン: 自動判定（{plan_type}）")
+            ntt_partner_note_final = _base_partner_note
         self.log("  [1] サービス追加ボタンをクリック")
         add_btn = page.locator(
             "id=j_id0:sve_form1:pageBlock1:dataTableSet2_addButton"
@@ -1573,12 +1667,14 @@ class BeamsOperator:
         )
         page.wait_for_timeout(300)
 
-        # 商材入力: ギガラインはルックアップ経由、クロス/隼はテキスト入力
+        # 商材入力: ギガラインはルックアップ経由、クロス/隼はテキスト入力、skipは省略
         _fid98 = "j_id0:sve_form1:pageBlock1:dataTableSet2_table:0:inputField98"
         _loc98 = page.locator(f'[id="{_fid98}"]')
         _loc98.scroll_into_view_if_needed()
 
-        if plan_type == "gigaline":
+        if plan_type == "skip":
+            self.log("  [1] 商材入力スキップ（空欄）")
+        elif plan_type == "gigaline":
             # ギガラインはルックアップポップアップで「フレッツ光ネクスト ファミリー・ギガライン東」を選択
             self.log(f"  [1] 商材ルックアップ起動（ギガライン）")
             _lookup_btn = page.locator(
@@ -1606,8 +1702,13 @@ class BeamsOperator:
                 _lk_popup.wait_for_timeout(300)
             except Exception:
                 pass
-            # 「ギガライン東」を含む行を探してクリック
-            _target_text = "ギガライン東"
+            # main_product に含まれるキーワードで行を探す（マンション・ファミリー両対応）
+            if "マンション" in main_product:
+                _target_text = "マンション・ギガライン東"
+            elif "ファミリー" in main_product:
+                _target_text = "ファミリー・ギガライン東"
+            else:
+                _target_text = "ギガライン東"
             _clicked = False
             try:
                 _lk_popup.wait_for_selector("a.dataCell", timeout=8000)
@@ -1666,7 +1767,7 @@ class BeamsOperator:
                     self.wait_for_loading()
                 except Exception as _re:
                     self.log(f"  [1] [リカバリ失敗] {_re}")
-        else:
+        elif plan_type in ("cross", "hayabusa"):
             # クロス / 隼: テキスト直接入力
             self.log(f"  [1] 商材入力: {main_product}")
             _loc98.click()
@@ -1674,16 +1775,17 @@ class BeamsOperator:
             _loc98.press("Tab")
             page.wait_for_timeout(200)
 
-        # BEAMSの mod / lkid フラグをセット（共通）
-        page.evaluate(
-            """([fid]) => {
-                var mod = document.getElementById(fid + '_mod');
-                if (mod) mod.value = '1';
-                var lkid = document.getElementById(fid + '_lkid');
-                if (lkid) lkid.value = '';
-            }""",
-            [_fid98]
-        )
+        # BEAMSの mod / lkid フラグをセット（skip以外）
+        if plan_type != "skip":
+            page.evaluate(
+                """([fid]) => {
+                    var mod = document.getElementById(fid + '_mod');
+                    if (mod) mod.value = '1';
+                    var lkid = document.getElementById(fid + '_lkid');
+                    if (lkid) lkid.value = '';
+                }""",
+                [_fid98]
+            )
 
         # 隼 / ギガライン / fixed: エースプランオプション追加
         if _use_option:
@@ -1993,7 +2095,8 @@ class BeamsOperator:
         ntt_partner = ""
         if self.live and 'OTHER' in self.live:
             ntt_msg     = self.live['OTHER'].get('ntt_message', '').strip()
-            ntt_partner = self.live['OTHER'].get('ntt_partner_note', '').strip()
+            # 前確コメントは section_service_info 冒頭で商材追記分を合成済みの値を使用
+            ntt_partner = ntt_partner_note_final
 
         self.log(f"  NTTへの伝言: 「{ntt_msg}」")
         page.fill(
@@ -2817,8 +2920,6 @@ class BeamsApp:
         'phone': '電話番号', 'zip_code': '郵便番号', 'azacho': '字名丁目',
         'banchi': '番地', 'building': '建物名',
         # SERVICE
-        'plan_cross': '商材（クロス）', 'plan_hayabusa': '商材（隼）', 'plan_gigaline': '商材（ギガライン）',
-        'plan_mode': '商材選択モード（auto/fixed）',
         'option_hayabusa': '電話プラン ／ オプション固定値',
         'phone_plan': '電話プラン（auto/none/fixed）',
         'current_line': '現在利用中電話回線',
@@ -2943,8 +3044,8 @@ class BeamsApp:
                 # phone_plan は option_hayabusa の行に統合して描画するためスキップ
                 if key == 'phone_plan':
                     continue
-                # plan_mode は plan_cross の行に統合して描画するためスキップ
-                if key == 'plan_mode':
+                # 商材系キーは自動マッピングに移行したため非表示
+                if key in ('plan_cross', 'plan_hayabusa', 'plan_gigaline', 'plan_mode'):
                     continue
                 # on_error はループ外の専用行で描画するためここではスキップ
                 if key == 'on_error':
@@ -2968,38 +3069,6 @@ class BeamsApp:
                              padx=6).pack(side="left", fill="x", expand=True)
                     _sv = tk.StringVar(value=display_val)
                     self._rules_vars[(sec, key)] = _sv
-
-                elif key == 'plan_cross':
-                    # ── plan_cross の行に plan_mode ラジオボタンを左統合 ──────
-                    _pm_raw = self.live_config[sec].get('plan_mode', 'auto').strip() \
-                              if 'plan_mode' in self.live_config[sec] else 'auto'
-                    rv_pm = tk.StringVar(value=_pm_raw if _pm_raw else 'auto')
-                    self._rules_vars[(sec, 'plan_mode')] = rv_pm
-                    for opt, lbl in [('auto', '自動'), ('fixed', '固定値')]:
-                        tk.Radiobutton(
-                            frame_row, text=lbl, variable=rv_pm, value=opt,
-                            bg=bg, fg="#202124",
-                            font=("Yu Gothic UI", 8),
-                            activebackground=bg,
-                        ).pack(side="left", padx=6)
-                    # 右側: クロス固定値テキスト入力
-                    v = tk.StringVar(value=display_val)
-                    self._rules_vars[(sec, key)] = v
-                    entry = tk.Entry(frame_row, textvariable=v,
-                                     font=("Yu Gothic UI", 8),
-                                     relief="flat", bg=bg,
-                                     highlightbackground=BORDER, highlightthickness=1)
-                    entry.pack(side="left", fill="x", expand=True, padx=4)
-
-                elif key in ('plan_hayabusa', 'plan_gigaline'):
-                    # 固定値入力のみ（plan_mode=fixed のとき参照される）
-                    v = tk.StringVar(value=display_val)
-                    self._rules_vars[(sec, key)] = v
-                    entry = tk.Entry(frame_row, textvariable=v,
-                                     font=("Yu Gothic UI", 8),
-                                     relief="flat", bg=bg,
-                                     highlightbackground=BORDER, highlightthickness=1)
-                    entry.pack(side="left", fill="x", expand=True, padx=4)
 
                 elif key == 'option_hayabusa':
                     # ── option_hayabusa の行に phone_plan ラジオボタンを左統合 ──
